@@ -13,7 +13,7 @@ object WathServiceSpec extends BaseSpec {
         for {
           watchService <- FileSystem.default.newWatchService
           watchKey     <- Path("nio-core/src/test/resources").register(watchService, ENTRY_CREATE)
-          watchable    <- watchKey.watchable
+          watchable     = watchKey.watchable
         } yield assert(watchable)(equalTo(Path("nio-core/src/test/resources")))
       )
     )
