@@ -1,6 +1,6 @@
 package zio.nio
 
-import java.io.EOFException
+import java.io.{ EOFException, IOException }
 
 import zio.{ IO, ZIO, ZManaged }
 
@@ -43,6 +43,13 @@ package object core {
     def bracketNio[R1 <: R, E1 >: E, B](use: A => ZIO[R1, E1, B]): ZIO[R1, E1, B] =
       value.bracket(_.close.ignore, use)
 
+  }
+
+  /**
+   * Used with `ZStream#refineOrDie`, since `ZStream#refineToOrDie` does not exist yet.
+   */
+  val ioExceptionOnly: PartialFunction[Throwable, IOException] = {
+    case io: IOException => io
   }
 
 }
