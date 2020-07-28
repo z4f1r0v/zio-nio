@@ -8,7 +8,11 @@ import zio.{ IO, UIO, ZIO, blocking }
 import zio.nio.core.{ ByteBuffer, SocketAddress }
 
 /**
- * A [[java.nio.channels.DatagramChannel]] wrapper allowing for basic [[zio.ZIO]] interoperability.
+ * A channel for datagram-oriented sockets.
+ *
+ * A newly created datagram channel is open but not connected. The `send` and `receive` methods can be used without
+ * needing to connect the channel. The channel must be connected to use `read` and `write` methods, and any methods
+ * based on them such as `stream` and `sink`.
  */
 sealed abstract class DatagramChannel[R] private[channels] (override protected[channels] val channel: JDatagramChannel)
     extends ModalChannel
@@ -89,7 +93,8 @@ object DatagramChannel {
 
   final class Blocking private[DatagramChannel] (c: JDatagramChannel)
       extends DatagramChannel[blocking.Blocking](c)
-      with WithEnv.Blocking {
+      with GatheringByteChannel.Blocking
+      with ScatteringByteChannel.Blocking {
 
     def nonBlockingMode: IO[IOException, NonBlocking] =
       IO.effect(c.configureBlocking(false))

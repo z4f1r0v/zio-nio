@@ -33,11 +33,11 @@ object Pipe {
 
   final class BlockingSinkChannel(c: JPipe.SinkChannel)
       extends SinkChannel[blocking.Blocking](c)
-      with WithEnv.Blocking {}
+      with GatheringByteChannel.Blocking {}
 
   final class BlockingSourceChannel(c: JPipe.SourceChannel)
       extends SourceChannel[blocking.Blocking](c)
-      with WithEnv.Blocking {}
+      with ScatteringByteChannel.Blocking {}
 
   final class NonBlockingSinkChannel(c: JPipe.SinkChannel) extends SinkChannel[Any](c) with SelectableChannel {}
 

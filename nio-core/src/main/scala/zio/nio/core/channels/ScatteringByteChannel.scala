@@ -2,11 +2,12 @@ package zio.nio.core
 
 package channels
 
-import java.io.IOException
+import java.io.{ EOFException, IOException }
 import java.nio.{ ByteBuffer => JByteBuffer }
 import java.nio.channels.{ ScatteringByteChannel => JScatteringByteChannel }
 
-import zio.{ Chunk, IO, ZIO }
+import zio._
+import zio.stream.ZStream
 
 /**
  * A channel that can read bytes into a sequence of buffers.
@@ -79,5 +80,34 @@ object ScatteringByteChannel {
 
   private def unwrap(dsts: Seq[ByteBuffer]): Array[JByteBuffer] =
     dsts.map(d => d.byteBuffer).toArray
+
+  trait Blocking extends ScatteringByteChannel[blocking.Blocking] with WithEnv.Blocking {
+
+    /**
+     * A `ZStream` that reads from this channel.
+     *
+     * The stream terminates without error if the channel reaches end-of-stream.
+     *
+     * @param bufferConstruct Optional, overrides how to construct the buffer used to transfer bytes read from this channel into the stream.
+     */
+    def stream(
+      bufferConstruct: URIO[blocking.Blocking, ByteBuffer] = Buffer.byte(5000)
+    ): ZStream[blocking.Blocking, IOException, Byte] =
+      ZStream {
+        bufferConstruct.toManaged_.map { buffer =>
+          val doRead = for {
+            _     <- read(buffer)
+            _     <- buffer.flip
+            chunk <- buffer.getChunk()
+            _     <- buffer.clear
+          } yield chunk
+          doRead.mapError {
+            case _: EOFException => None
+            case e               => Some(e)
+          }
+        }
+      }
+
+  }
 
 }

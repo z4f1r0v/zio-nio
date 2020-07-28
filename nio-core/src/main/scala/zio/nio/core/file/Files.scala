@@ -8,17 +8,19 @@ import java.nio.file.{
   FileVisitOption,
   LinkOption,
   OpenOption,
+  StandardOpenOption,
   Files => JFiles,
   Path => JPath
 }
 import java.nio.file.attribute._
 import java.util.function.BiPredicate
 
-import zio.{ Chunk, ZIO, ZManaged }
+import zio.{ Chunk, URIO, ZIO, ZManaged, blocking }
 import zio.blocking._
+import zio.nio.core.channels.FileChannel
 import zio.nio.core.charset.Charset
-import zio.nio.core.ioExceptionOnly
-import zio.stream.ZStream
+import zio.nio.core.{ Buffer, ByteBuffer, ioExceptionOnly }
+import zio.stream.{ ZSink, ZStream }
 
 import scala.jdk.CollectionConverters._
 import scala.reflect._
@@ -266,6 +268,18 @@ object Files {
   def readAllLines(path: Path, charset: Charset = Charset.Standard.utf8): ZIO[Blocking, IOException, List[String]] =
     effectBlocking(JFiles.readAllLines(path.javaPath, charset.javaCharset).asScala.toList).refineToOrDie[IOException]
 
+  /**
+   * Creates a `ZStream` that reads from a specified file.
+   *
+   * @param path The file to read from.
+   * @param bufferConstruct Optional, overrides how to construct the buffer used to transfer bytes read to the stream.
+   */
+  def readStream(
+    path: Path,
+    bufferConstruct: URIO[blocking.Blocking, ByteBuffer] = Buffer.byte(5000)
+  ): ZStream[Blocking, IOException, Byte] =
+    ZStream.unwrapManaged(FileChannel.open(path, StandardOpenOption.READ).toManagedNio.map(_.stream(bufferConstruct)))
+
   def writeBytes(path: Path, bytes: Chunk[Byte], openOptions: OpenOption*): ZIO[Blocking, IOException, Unit] =
     effectBlocking(JFiles.write(path.javaPath, bytes.toArray, openOptions: _*)).unit.refineToOrDie[IOException]
 
@@ -277,6 +291,26 @@ object Files {
   ): ZIO[Blocking, IOException, Unit] =
     effectBlocking(JFiles.write(path.javaPath, lines.asJava, charset.javaCharset, openOptions.toSeq: _*)).unit
       .refineToOrDie[IOException]
+
+  /**
+   * Creates a sink that writes to the specified file.
+   *
+   * @param path The file to write to.
+   * @param openOptions How to open the file. If empty, the default options of `CREATE`, `WRITE` and `TRUNCATE_EXISTING` are used.
+   * @param bufferConstruct Optional, overrides how to construct the buffer used to transfer bytes received by the sink to the file.
+   */
+  def writeSink(
+    path: Path,
+    openOptions: Set[OpenOption] = Set.empty,
+    bufferConstruct: URIO[blocking.Blocking, ByteBuffer] = Buffer.byte(5000)
+  ): ZSink[Blocking, IOException, Byte, Byte, Long] = {
+    val opts =
+      if (openOptions.isEmpty)
+        Set(StandardOpenOption.CREATE, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)
+      else
+        openOptions
+    ZSink.managed(FileChannel.open(path, opts).toManagedNio)(_.sink(bufferConstruct))
+  }
 
   def lines(path: Path, charset: Charset = Charset.Standard.utf8): ZStream[Blocking, IOException, String] =
     ZStream

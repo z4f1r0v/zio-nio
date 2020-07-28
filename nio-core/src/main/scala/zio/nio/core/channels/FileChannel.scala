@@ -20,8 +20,8 @@ import scala.collection.JavaConverters._
  * Read and write calls operate at the current position.
  */
 final class FileChannel private[channels] (override protected[channels] val channel: JFileChannel)
-    extends GatheringByteChannel[Blocking]
-    with ScatteringByteChannel[Blocking]
+    extends GatheringByteChannel.Blocking
+    with ScatteringByteChannel.Blocking
     with WithEnv.Blocking {
 
   def position: IO[IOException, Long] = IO.effect(channel.position()).refineToOrDie[IOException]

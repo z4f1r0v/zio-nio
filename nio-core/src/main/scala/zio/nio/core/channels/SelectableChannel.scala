@@ -97,7 +97,8 @@ object SocketChannel {
 
   final class Blocking private[SocketChannel] (c: JSocketChannel)
       extends SocketChannel[blocking.Blocking](c)
-      with WithEnv.Blocking {
+      with GatheringByteChannel.Blocking
+      with ScatteringByteChannel.Blocking {
 
     def nonBlockingMode: IO[IOException, NonBlocking] =
       IO.effect(c.configureBlocking(false))
