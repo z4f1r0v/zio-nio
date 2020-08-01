@@ -2,7 +2,8 @@ package zio.nio
 
 import java.io.{ EOFException, IOException }
 
-import zio.{ IO, ZIO, ZManaged }
+import zio.{ Fiber, IO, ZIO, ZManaged }
+import zio.ZManaged.ReleaseMap
 
 package object core {
 
@@ -34,14 +35,18 @@ package object core {
 
     /**
      * Lifts an effect producing a closeable NIO resource into a `ZManaged` value.
+     * The acquisition of the resource is interruptible, as NIO resource acquisitions are often blocking
+     * operations that should be interruptible.
      */
-    def toManagedNio: ZManaged[R, E, A] = value.toManaged(_.close.ignore)
+    def toManagedNio: ZManaged[R, E, A] = ZManaged.makeInterruptible(value)(_.close.ignore)
 
     /**
      * Provides bracketing for any effect producing a closeable NIO resource.
+     * The acquisition of the resource is interruptible, as NIO resource acquisitions are often blocking
+     * operations that should be interruptible.
      */
     def bracketNio[R1 <: R, E1 >: E, B](use: A => ZIO[R1, E1, B]): ZIO[R1, E1, B] =
-      value.bracket(_.close.ignore, use)
+      value.interruptible.bracket(_.close.ignore, use)
 
   }
 
@@ -50,6 +55,21 @@ package object core {
    */
   val ioExceptionOnly: PartialFunction[Throwable, IOException] = {
     case io: IOException => io
+  }
+
+  implicit final class ManagedOps[-R, +E, +A](private val managed: ZManaged[R, E, A]) extends AnyVal {
+
+    /**
+     * Use this managed resource in an effect running in a forked fiber.
+     * The resource will be released on the forked fiber after the effect exits,
+     * whether it succeeds, fails or is interrupted.
+     *
+     * @param f The effect to run in a forked fiber. The resource is only valid within this effect.
+     */
+    def useForked[R2 <: R, E2 >: E, B](f: A => ZIO[R2, E2, B]): ZIO[R2, E, Fiber[E2, B]] =
+      ReleaseMap.make.flatMap { releaseMap =>
+        managed.zio.provideSome[R]((_, releaseMap)).flatMap { case (finalizer, a) => f(a).onExit(finalizer).fork }
+      }
   }
 
 }

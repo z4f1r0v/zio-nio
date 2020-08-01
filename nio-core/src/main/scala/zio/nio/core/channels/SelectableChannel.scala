@@ -8,7 +8,7 @@ import java.nio.channels.{
   SocketChannel => JSocketChannel
 }
 
-import zio.{ IO, Managed, UIO, ZIO, blocking }
+import zio._
 import zio.nio.core.channels.SelectionKey.Operation
 import zio.nio.core.channels.spi.SelectorProvider
 import zio.nio.core.SocketAddress
@@ -187,9 +187,18 @@ object ServerSocketChannel {
         .refineToOrDie[IOException]
         .as(new NonBlocking(c))
 
+    /**
+     * Accepts a connection made to this server socket.
+     * Blocks until a connection is made.
+     */
     def accept: ZIO[blocking.Blocking, IOException, SocketChannel.Blocking] =
       isBlocking.filterOrDie(identity)(new IllegalStateException("Blocking socket in non-blocking mode")) *>
-        IO.effect(SocketChannel.Blocking.fromJava(c.accept())).refineToOrDie[IOException]
+        blocking.effectBlockingInterrupt(SocketChannel.Blocking.fromJava(c.accept())).refineToOrDie[IOException]
+
+    def acceptAndFork[R, A](
+      use: SocketChannel.Blocking => ZIO[blocking.Blocking with R, IOException, A]
+    ): ZIO[blocking.Blocking with R, IOException, Fiber[IOException, A]] =
+      accept.toManagedNio.useForked(use)
 
   }
 
