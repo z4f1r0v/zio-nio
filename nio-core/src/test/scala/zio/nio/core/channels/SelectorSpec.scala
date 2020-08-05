@@ -70,7 +70,7 @@ object SelectorSpec extends BaseSpec {
       channel  <- ServerSocketChannel.NonBlocking.open.toManagedNio
       _        <- ZManaged.fromEffect {
                     for {
-                      _      <- channel.bind(address)
+                      _      <- channel.bindTo(address)
                       _      <- channel.register(selector, Operation.Accept)
                       buffer <- Buffer.byte(256)
                       addr   <- channel.localAddress.someOrElseM(IO.dieMessage("Address not bound"))

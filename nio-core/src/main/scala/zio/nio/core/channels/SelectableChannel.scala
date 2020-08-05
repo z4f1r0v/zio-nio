@@ -162,8 +162,31 @@ object SocketChannel {
 sealed abstract class ServerSocketChannel[R](override protected val channel: JServerSocketChannel)
     extends ModalChannel {
 
-  def bind(local: SocketAddress, backlog: Int = 0): IO[IOException, Unit] =
-    IO.effect(channel.bind(local.jSocketAddress, backlog)).refineToOrDie[IOException].unit
+  /**
+   * Binds this channel's socket to a local address and configures the socket to listen for connections.
+   *
+   * @param local The local socket address to bind to.
+   * @param backlog The maximum number of pending connections, defaults to 0
+   */
+  def bindTo(local: SocketAddress, backlog: Int = 0): IO[IOException, Unit] = bind(Some(local), backlog)
+
+  /**
+   * Binds this channel's socket to an automatically assigned local address.
+   * The `localAddress` method can be used to find out the exact socket address that was bound to.
+   *
+   * @param backlog The maximum number of pending connections, defaults to 0
+   */
+  def bindAuto(backlog: Int = 0): IO[IOException, Unit] = bind(None, backlog)
+
+  /**
+   * Binds this channel's socket to a local address and configures the socket to listen for connections.
+   * The `localAddress` method can be used to find out the exact socket address that was bound to.
+   *
+   * @param local The local socket address to bind to. If not specified, binds to an automatically assigned address.
+   * @param backlog The maximum number of pending connections, defaults to 0
+   */
+  def bind(local: Option[SocketAddress], backlog: Int = 0): IO[IOException, Unit] =
+    IO.effect(channel.bind(local.map(_.jSocketAddress).orNull, backlog)).refineToOrDie[IOException].unit
 
   def setOption[T](name: SocketOption[T], value: T): IO[IOException, Unit] =
     IO.effect(channel.setOption(name, value)).refineToOrDie[IOException].unit
@@ -171,6 +194,10 @@ sealed abstract class ServerSocketChannel[R](override protected val channel: JSe
   def socket: UIO[JServerSocket] =
     IO.effectTotal(channel.socket())
 
+  /**
+   * Returns the socket address that this channel's socket is bound to.
+   * Returns `None` if this socket is not yet bound to an address.
+   */
   def localAddress: IO[IOException, Option[SocketAddress]] =
     IO.effect(Option(channel.getLocalAddress()).map(new SocketAddress(_))).refineToOrDie[IOException]
 
@@ -193,8 +220,17 @@ object ServerSocketChannel {
      */
     def accept: ZIO[blocking.Blocking, IOException, SocketChannel.Blocking] =
       isBlocking.filterOrDie(identity)(new IllegalStateException("Blocking socket in non-blocking mode")) *>
-        blocking.effectBlockingInterrupt(SocketChannel.Blocking.fromJava(c.accept())).refineToOrDie[IOException]
+        // the best way to cancel a blocking channel I/O operation is to close the channel
+        blocking
+          .effectBlockingCancelable(SocketChannel.Blocking.fromJava(c.accept()))(close.ignore)
+          .refineToOrDie[IOException]
 
+    /**
+     * Accepts a connection which is used to create a forked effect value.
+     * The effect value returned by `use` is run on a forked fiber.
+     * The accept socket will be automatically closed once the fiber completes,
+     * whether successful, failed or interrupted.
+     */
     def acceptAndFork[R, A](
       use: SocketChannel.Blocking => ZIO[blocking.Blocking with R, IOException, A]
     ): ZIO[blocking.Blocking with R, IOException, Fiber[IOException, A]] =

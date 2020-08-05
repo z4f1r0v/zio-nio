@@ -1,10 +1,13 @@
 package zio.nio.core.channels
 
-import zio.nio.core.{ BaseSpec, Buffer, SocketAddress }
-import zio.test.{ suite, testM }
+import java.{ nio => jnio }
+
 import zio.{ IO, _ }
-import zio.test._
+import zio.duration._
+import zio.nio.core.{ BaseSpec, Buffer, SocketAddress }
+import zio.test.{ suite, testM, _ }
 import zio.test.Assertion._
+import zio.test.environment.live
 
 object ChannelSpec extends BaseSpec {
 
@@ -131,6 +134,60 @@ object ChannelSpec extends BaseSpec {
           _             <- client(addr)
           _             <- s2.join
         } yield assertCompletes
+      },
+      testM("blocking read can be interrupted") {
+        live {
+          for {
+            pipe  <- Pipe.open
+            src   <- pipe.sourceBlocking
+            fiber <- src.readChunk(1).fork
+            _     <- ZIO.sleep(1.second)
+            exit  <- fiber.interrupt
+          } yield assert(exit)(isInterrupted)
+        }
+      },
+      testM("blocking write can be interrupted") {
+        val hangingChannel: GatheringByteChannel.Blocking = new GatheringByteChannel.Blocking {
+          override protected[channels] val channel = new jnio.channels.GatheringByteChannel {
+
+            @volatile private var _closed = false
+
+            private def hang(): Nothing = {
+              while (!_closed)
+                Thread.sleep(10L)
+              throw new jnio.channels.AsynchronousCloseException()
+            }
+
+            override def write(srcs: Array[jnio.ByteBuffer], offset: Int, length: Int): Long = hang()
+
+            override def write(srcs: Array[jnio.ByteBuffer]): Long = hang()
+
+            override def write(src: jnio.ByteBuffer): Int = hang()
+
+            override def isOpen: Boolean = !_closed
+
+            override def close(): Unit = _closed = true
+          }
+        }
+
+        live {
+          for {
+            fiber <- hangingChannel.writeChunk(Chunk.single(42.toByte)).fork
+            _     <- ZIO.sleep(100.milliseconds)
+            exit  <- fiber.interrupt
+          } yield assert(exit)(isInterrupted)
+        }
+      },
+      testM("blocking accept can be interrupted") {
+        live {
+          for {
+            serverChannel <- ServerSocketChannel.Blocking.open
+            _             <- serverChannel.bindAuto()
+            fiber         <- serverChannel.accept.fork
+            _             <- ZIO.sleep(100.milliseconds)
+            exit          <- fiber.interrupt
+          } yield assert(exit)(isInterrupted)
+        }
       }
     )
 }

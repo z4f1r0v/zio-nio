@@ -39,14 +39,14 @@ final class InetSocketAddress private[nio] (private val jInetSocketAddress: JIne
     extends SocketAddress(jInetSocketAddress) {
 
   /**
-   * The socket's address.
+   * Gets the `InetAddress`.
    *
-   * @return The address of the socket, or `None` if this socket address is not resolved.
+   * @return The address, or `None` if this socket address is not resolved.
    */
   def address: Option[InetAddress] = Option(jInetSocketAddress.getAddress).map(new InetAddress(_))
 
   /**
-   * The socket's port number.
+   * Gets the port number.
    */
   def port: Int = jInetSocketAddress.getPort
 

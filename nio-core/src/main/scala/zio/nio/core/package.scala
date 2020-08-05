@@ -2,7 +2,7 @@ package zio.nio
 
 import java.io.{ EOFException, IOException }
 
-import zio.{ Fiber, IO, ZIO, ZManaged }
+import zio._
 import zio.ZManaged.ReleaseMap
 
 package object core {

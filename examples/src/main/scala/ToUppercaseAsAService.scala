@@ -52,11 +52,11 @@ object ToUppercaseAsAService extends App {
     val startServer = for {
       serverChannel <- ServerSocketChannel.Blocking.open
       socketAddress <- SocketAddress.inetSocketAddress(port)
-      _             <- serverChannel.bind(socketAddress)
+      _             <- serverChannel.bindTo(socketAddress)
       _             <- console.putStrLn(s"Listening on $socketAddress")
     } yield serverChannel
     startServer
-      .flatMap(c => c.accept.toManagedNio.useForked(handleConnection).forever)
+      .flatMap(c => c.acceptAndFork(handleConnection).forever)
       .exitCode
   }
 }
