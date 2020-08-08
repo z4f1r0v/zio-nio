@@ -5,6 +5,9 @@ import java.io.{ EOFException, IOException }
 import zio._
 import zio.ZManaged.ReleaseMap
 
+/**
+ * ZIO-NIO, the API for using Java's NIO API in ZIO programs.
+ */
 package object core {
 
   /**

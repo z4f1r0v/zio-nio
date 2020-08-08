@@ -114,6 +114,10 @@ object AsynchronousServerSocketChannel {
   ): IO[IOException, AsynchronousServerSocketChannel] =
     IO.effect(new AsynchronousServerSocketChannel(JAsynchronousServerSocketChannel.open(channelGroup.channelGroup)))
       .refineToOrDie[IOException]
+
+  def fromJava(channel: JAsynchronousServerSocketChannel): AsynchronousServerSocketChannel =
+    new AsynchronousServerSocketChannel(channel)
+
 }
 
 class AsynchronousSocketChannel(override protected val channel: JAsynchronousSocketChannel)
