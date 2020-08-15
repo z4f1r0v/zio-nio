@@ -58,7 +58,7 @@ final class FileChannel private[channels] (override protected[channels] val chan
    * @param size The new size, must be >= 0
    */
   def truncate(size: Long): ZIO[Blocking, IOException, Unit] =
-    effectBlocking(channel.truncate(size)).unit.refineToOrDie[IOException]
+    effectBlockingIO(channel.truncate(size)).unit
 
   /**
    * Forces any updates to this channel's file to be written to the storage device that contains it.
@@ -67,7 +67,7 @@ final class FileChannel private[channels] (override protected[channels] val chan
    *                 be written to storage; otherwise, it need only force content changes to be written
    */
   def force(metadata: Boolean): ZIO[Blocking, IOException, Unit] =
-    effectBlocking(channel.force(metadata)).refineToOrDie[IOException]
+    effectBlockingIO(channel.force(metadata))
 
   /**
    * Transfers bytes from this channel's file to the given writable byte channel.
@@ -77,7 +77,8 @@ final class FileChannel private[channels] (override protected[channels] val chan
    * @param target The target channel
    */
   def transferTo(position: Long, count: Long, target: GatheringByteChannel[_]): ZIO[Blocking, IOException, Long] =
-    effectBlocking(channel.transferTo(position, count, target.channel)).refineToOrDie[IOException]
+    effectBlockingCancelable(channel.transferTo(position, count, target.channel))(close.ignore)
+      .refineToOrDie[IOException]
 
   /**
    * Transfers bytes into this channel's file from the given readable byte channel.
@@ -87,7 +88,8 @@ final class FileChannel private[channels] (override protected[channels] val chan
    * @param count The maximum number of bytes to be transferred, must be >= 0
    */
   def transferFrom(src: ScatteringByteChannel[_], position: Long, count: Long): ZIO[Blocking, IOException, Long] =
-    effectBlocking(channel.transferFrom(src.channel, position, count)).refineToOrDie[IOException]
+    effectBlockingCancelable(channel.transferFrom(src.channel, position, count))(close.ignore)
+      .refineToOrDie[IOException]
 
   /**
    * Reads a sequence of bytes from this channel into the given buffer, starting at the given file position.
@@ -101,7 +103,9 @@ final class FileChannel private[channels] (override protected[channels] val chan
    */
   def read(dst: ByteBuffer, position: Long): ZIO[Blocking, IOException, Int] =
     dst
-      .withJavaBuffer[Blocking, Throwable, Int](buffer => effectBlocking(channel.read(buffer, position)))
+      .withJavaBuffer[Blocking, Throwable, Int](buffer =>
+        effectBlockingCancelable(channel.read(buffer, position))(close.ignore)
+      )
       .refineToOrDie[IOException]
 
   /**
@@ -118,7 +122,9 @@ final class FileChannel private[channels] (override protected[channels] val chan
    */
   def write(src: ByteBuffer, position: Long): ZIO[Blocking, IOException, Int] =
     src
-      .withJavaBuffer[Blocking, Throwable, Int](buffer => effectBlocking(channel.write(buffer, position)))
+      .withJavaBuffer[Blocking, Throwable, Int](buffer =>
+        effectBlockingCancelable(channel.write(buffer, position))(close.ignore)
+      )
       .refineToOrDie[IOException]
 
   /**
@@ -137,9 +143,7 @@ final class FileChannel private[channels] (override protected[channels] val chan
    * @param size The size of the region to be mapped, must be >= 0 and <= `Int.MaxValue`
    */
   def map(mode: JFileChannel.MapMode, position: Long, size: Long): ZIO[Blocking, IOException, MappedByteBuffer] =
-    ZIO
-      .accessM[Blocking](_.get.effectBlocking(new MappedByteBuffer(channel.map(mode, position, size))))
-      .refineToOrDie[IOException]
+    effectBlockingIO(new MappedByteBuffer(channel.map(mode, position, size)))
 
   /**
    * Acquires a lock on the given region of this channel's file.
@@ -195,8 +199,7 @@ object FileChannel {
     options: Set[_ <: OpenOption],
     attrs: FileAttribute[_]*
   ): ZIO[Blocking, IOException, FileChannel] =
-    effectBlocking(new FileChannel(JFileChannel.open(path.javaPath, options.asJava, attrs: _*)))
-      .refineToOrDie[IOException]
+    effectBlockingIO(new FileChannel(JFileChannel.open(path.javaPath, options.asJava, attrs: _*)))
 
   /**
    * Opens or creates a file, returning a file channel to access the file.
@@ -205,8 +208,7 @@ object FileChannel {
    * @param options Specifies how the file is opened
    */
   def open(path: Path, options: OpenOption*): ZIO[Blocking, IOException, FileChannel] =
-    effectBlocking(new FileChannel(JFileChannel.open(path.javaPath, options: _*)))
-      .refineToOrDie[IOException]
+    effectBlockingIO(new FileChannel(JFileChannel.open(path.javaPath, options: _*)))
 
   def fromJava(javaFileChannel: JFileChannel): FileChannel = new FileChannel(javaFileChannel)
 
