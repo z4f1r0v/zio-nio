@@ -62,7 +62,9 @@ object GatheringByteChannel {
   private def unwrap(srcs: List[ByteBuffer]): Array[JByteBuffer] =
     srcs.map(d => d.byteBuffer).toArray
 
-  trait Blocking extends GatheringByteChannel[blocking.Blocking] with WithEnv.Blocking {
+  trait SinkWrite[R] {
+
+    this: GatheringByteChannel[R] =>
 
     /**
      * A sink that will write all the bytes it receives to this channel.
@@ -70,8 +72,8 @@ object GatheringByteChannel {
      * @param bufferConstruct Optional, overrides how to construct the buffer used to transfer bytes received by the sink to this channel.
      */
     def sink(
-      bufferConstruct: URIO[blocking.Blocking, ByteBuffer] = Buffer.byte(5000)
-    ): ZSink[blocking.Blocking, IOException, Byte, Nothing, Long] =
+      bufferConstruct: URIO[R, ByteBuffer] = Buffer.byte(5000)
+    ): ZSink[R, IOException, Byte, Nothing, Long] =
       ZSink {
         for {
           buffer   <- bufferConstruct.toManaged_
@@ -96,5 +98,33 @@ object GatheringByteChannel {
             )
           )
       }
+
+  }
+
+  trait Blocking
+      extends GatheringByteChannel[blocking.Blocking]
+      with SinkWrite[blocking.Blocking]
+      with WithEnv.Blocking {
+
+    self =>
+
+    /**
+     * Efficiently performs a set of interruptible blocking write operations.
+     *
+     * Performing blocking I/O in a ZIO effect with support for effect interruption imposes some overheads.
+     * Ideally, all the writes to this channel should be done in an effect value passed to this method,
+     * so that the blocking overhead cost is paid only once.
+     *
+     * @param f And effect that can perform writes given a non-blocking writable byte channel.
+     *          The entire effect is run on the same thread in the blocking pool.
+     */
+    def blockingWrites[R, E, A](
+      f: GatheringByteChannel[Any] with SinkWrite[Any] => ZIO[R, E, A]
+    ): ZIO[R with blocking.Blocking, E, A] = {
+      val channel = new GatheringByteChannel[Any] with SinkWrite[Any] with WithEnv.NonBlocking {
+        override protected[channels] val channel = self.channel
+      }
+      WithEnv.withBlocking(channel)(f(channel))
+    }
   }
 }

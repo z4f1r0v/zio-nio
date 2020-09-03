@@ -29,11 +29,17 @@ private[channels] object WithEnv {
      * but this results in the channel being closed anyway, and is more expensive for ZIO to arrange.
      */
     override protected def withEnv[E, A](effect: IO[E, A]): ZIO[blocking.Blocking, E, A] =
-      blocking.blocking(effect).fork.flatMap(_.join).onInterrupt(close.ignore)
+      withBlocking(this)(effect)
+
   }
 
   trait NonBlocking extends WithEnv[Any] {
     override protected def withEnv[E, A](effect: IO[E, A]): ZIO[Any, E, A] = effect
   }
+
+  def withBlocking[R, E, A](
+    c: IOCloseable[blocking.Blocking]
+  )(effect: ZIO[R, E, A]): ZIO[R with blocking.Blocking, E, A] =
+    zio.blocking.blocking(effect.fork.flatMap(_.join).onInterrupt(c.close.ignore))
 
 }

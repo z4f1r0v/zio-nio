@@ -106,7 +106,10 @@ object SocketChannel {
         .as(new NonBlocking(c))
 
     def connect(remote: SocketAddress): ZIO[blocking.Blocking, IOException, Unit] =
-      IO.effect(channel.connect(remote.jSocketAddress)).refineToOrDie[IOException].unit
+      blocking
+        .effectBlockingCancelable(channel.connect(remote.jSocketAddress))(close.ignore)
+        .refineToOrDie[IOException]
+        .unit
 
   }
 
@@ -119,9 +122,7 @@ object SocketChannel {
       IO.effect(fromJava(JSocketChannel.open())).refineToOrDie[IOException]
 
     def open(remote: SocketAddress): ZIO[blocking.Blocking, IOException, Blocking] =
-      blocking
-        .effectBlockingInterrupt(fromJava(JSocketChannel.open(remote.jSocketAddress)))
-        .refineToOrDie[IOException]
+      open.tap(_.connect(remote))
 
   }
 
