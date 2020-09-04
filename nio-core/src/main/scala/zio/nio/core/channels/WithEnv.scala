@@ -3,7 +3,9 @@ package channels
 
 import zio.{ IO, ZIO, blocking }
 
-private[channels] trait WithEnv[R] {
+private[channels] trait WithEnv {
+
+  type Env
 
   /**
    * Performs an effect using some environment `R`.
@@ -12,15 +14,17 @@ private[channels] trait WithEnv[R] {
    *  - `WithEnv.Blocking` returns the effect using ZIO's blocking thread pool from environment `zio.blocking.Blocking`.
    *    Such blocking effects can be interrupted.
    */
-  protected def withEnv[E, A](effect: IO[E, A]): ZIO[R, E, A]
+  protected def withEnv[E, A](effect: IO[E, A]): ZIO[Env, E, A]
 
 }
 
 private[channels] object WithEnv {
 
-  trait Blocking extends WithEnv[blocking.Blocking] {
+  trait Blocking extends WithEnv {
 
     this: IOCloseable[blocking.Blocking] =>
+
+    type Env = blocking.Blocking
 
     /**
      * Performs a blocking NIO channel operation on the blocking thread pool and respecting interruption.
@@ -33,7 +37,10 @@ private[channels] object WithEnv {
 
   }
 
-  trait NonBlocking extends WithEnv[Any] {
+  trait NonBlocking extends WithEnv {
+
+    type Env = Any
+
     override protected def withEnv[E, A](effect: IO[E, A]): ZIO[Any, E, A] = effect
   }
 

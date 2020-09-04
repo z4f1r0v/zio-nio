@@ -12,7 +12,7 @@ import zio.stream.ZStream
 /**
  * A channel that can read bytes into a sequence of buffers.
  */
-trait ScatteringByteChannel[R] extends Channel with WithEnv[R] {
+trait ScatteringByteChannel extends Channel with WithEnv {
 
   import ScatteringByteChannel._
 
@@ -25,7 +25,7 @@ trait ScatteringByteChannel[R] extends Channel with WithEnv[R] {
    *
    * @return The number of bytes read in total, possibly 0
    */
-  final def read(dsts: Seq[ByteBuffer]): ZIO[R, IOException, Long] =
+  final def read(dsts: Seq[ByteBuffer]): ZIO[Env, IOException, Long] =
     withEnv {
       IO.effect(channel.read(unwrap(dsts))).refineToOrDie[IOException].flatMap(eofCheck)
     }
@@ -37,7 +37,7 @@ trait ScatteringByteChannel[R] extends Channel with WithEnv[R] {
    *
    * @return The number of bytes read, possibly 0
    */
-  final def read(dst: ByteBuffer): ZIO[R, IOException, Int] =
+  final def read(dst: ByteBuffer): ZIO[Env, IOException, Int] =
     withEnv {
       IO.effect(channel.read(dst.byteBuffer)).refineToOrDie[IOException].flatMap(eofCheck)
     }
@@ -50,7 +50,7 @@ trait ScatteringByteChannel[R] extends Channel with WithEnv[R] {
    * @param capacity The maximum number of bytes to be read.
    * @return The bytes read, between 0 and `capacity` in size, inclusive
    */
-  final def readChunk(capacity: Int): ZIO[R, IOException, Chunk[Byte]] =
+  final def readChunk(capacity: Int): ZIO[Env, IOException, Chunk[Byte]] =
     for {
       buffer <- Buffer.byte(capacity)
       _      <- read(buffer)
@@ -67,7 +67,7 @@ trait ScatteringByteChannel[R] extends Channel with WithEnv[R] {
    * @return A list with one `Chunk` per input size. Some chunks may be less than the requested size if the channel
    *         does not have enough data
    */
-  final def readChunks(capacities: Seq[Int]): ZIO[R, IOException, List[Chunk[Byte]]] =
+  final def readChunks(capacities: Seq[Int]): ZIO[Env, IOException, List[Chunk[Byte]]] =
     for {
       buffers <- IO.foreach(capacities)(Buffer.byte)
       _       <- read(buffers)
@@ -81,9 +81,9 @@ object ScatteringByteChannel {
   private def unwrap(dsts: Seq[ByteBuffer]): Array[JByteBuffer] =
     dsts.map(d => d.byteBuffer).toArray
 
-  trait StreamRead[R] {
+  trait StreamRead {
 
-    this: ScatteringByteChannel[R] =>
+    this: ScatteringByteChannel =>
 
     /**
      * A `ZStream` that reads from this channel.
@@ -93,8 +93,8 @@ object ScatteringByteChannel {
      * @param bufferConstruct Optional, overrides how to construct the buffer used to transfer bytes read from this channel into the stream.
      */
     def stream(
-      bufferConstruct: URIO[R, ByteBuffer] = Buffer.byte(5000)
-    ): ZStream[R, IOException, Byte] =
+      bufferConstruct: URIO[Env, ByteBuffer] = Buffer.byte(5000)
+    ): ZStream[Env, IOException, Byte] =
       ZStream {
         bufferConstruct.toManaged_.map { buffer =>
           val doRead = for {
@@ -111,10 +111,9 @@ object ScatteringByteChannel {
       }
   }
 
-  trait Blocking
-      extends ScatteringByteChannel[blocking.Blocking]
-      with StreamRead[blocking.Blocking]
-      with WithEnv.Blocking {
+  trait ScopedBlockingReads extends ScatteringByteChannel with StreamRead with WithEnv.NonBlocking
+
+  trait Blocking extends ScatteringByteChannel with StreamRead with WithEnv.Blocking {
 
     self =>
 
@@ -129,9 +128,9 @@ object ScatteringByteChannel {
      *          The entire effect is run on the same thread in the blocking pool.
      */
     def blockingReads[R, E, A](
-      f: ScatteringByteChannel[Any] with StreamRead[Any] => ZIO[R, E, A]
+      f: ScopedBlockingReads => ZIO[R, E, A]
     ): ZIO[R with blocking.Blocking, E, A] = {
-      val channel = new ScatteringByteChannel[Any] with StreamRead[Any] with WithEnv.NonBlocking {
+      val channel = new ScopedBlockingReads {
         override protected[channels] val channel = self.channel
       }
       WithEnv.withBlocking(channel)(f(channel))

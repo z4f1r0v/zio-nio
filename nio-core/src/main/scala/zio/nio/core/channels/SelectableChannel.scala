@@ -61,10 +61,10 @@ trait SelectableChannel extends ModalChannel with WithEnv.NonBlocking {
 
 }
 
-sealed abstract class SocketChannel[R](override protected[channels] val channel: JSocketChannel)
+sealed abstract class SocketChannel(override protected[channels] val channel: JSocketChannel)
     extends ModalChannel
-    with GatheringByteChannel[R]
-    with ScatteringByteChannel[R] {
+    with GatheringByteChannel
+    with ScatteringByteChannel {
 
   def bind(local: SocketAddress): IO[IOException, Unit] =
     IO.effect(channel.bind(local.jSocketAddress)).refineToOrDie[IOException].unit
@@ -96,7 +96,7 @@ sealed abstract class SocketChannel[R](override protected[channels] val channel:
 object SocketChannel {
 
   final class Blocking private[SocketChannel] (c: JSocketChannel)
-      extends SocketChannel[blocking.Blocking](c)
+      extends SocketChannel(c)
       with GatheringByteChannel.Blocking
       with ScatteringByteChannel.Blocking {
 
@@ -126,9 +126,7 @@ object SocketChannel {
 
   }
 
-  final class NonBlocking private[SocketChannel] (c: JSocketChannel)
-      extends SocketChannel[Any](c)
-      with SelectableChannel {
+  final class NonBlocking private[SocketChannel] (c: JSocketChannel) extends SocketChannel(c) with SelectableChannel {
 
     def blockingMode: IO[IOException, Blocking] =
       IO.effect(c.configureBlocking(true))
@@ -160,8 +158,7 @@ object SocketChannel {
   }
 }
 
-sealed abstract class ServerSocketChannel[R](override protected val channel: JServerSocketChannel)
-    extends ModalChannel {
+sealed abstract class ServerSocketChannel(override protected val channel: JServerSocketChannel) extends ModalChannel {
 
   /**
    * Binds this channel's socket to a local address and configures the socket to listen for connections.
@@ -206,9 +203,7 @@ sealed abstract class ServerSocketChannel[R](override protected val channel: JSe
 
 object ServerSocketChannel {
 
-  final class Blocking private[ServerSocketChannel] (c: JServerSocketChannel)
-      extends ServerSocketChannel[blocking.Blocking](c)
-      with WithEnv.Blocking {
+  final class Blocking private[ServerSocketChannel] (c: JServerSocketChannel) extends ServerSocketChannel(c) {
 
     def nonBlockingMode: IO[IOException, NonBlocking] =
       IO.effect(c.configureBlocking(false))
@@ -229,7 +224,7 @@ object ServerSocketChannel {
     /**
      * Accepts a connection which is used to create a forked effect value.
      * The effect value returned by `use` is run on a forked fiber.
-     * The accept socket will be automatically closed once the fiber completes,
+     * The accepted socket will be automatically closed once the fiber completes,
      * whether successful, failed or interrupted.
      */
     def acceptAndFork[R, A](
@@ -250,7 +245,7 @@ object ServerSocketChannel {
   }
 
   final class NonBlocking private[ServerSocketChannel] (c: JServerSocketChannel)
-      extends ServerSocketChannel[Any](c)
+      extends ServerSocketChannel(c)
       with SelectableChannel {
 
     def blockingMode: IO[IOException, Blocking] =

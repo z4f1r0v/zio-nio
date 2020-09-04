@@ -4,9 +4,8 @@ import java.io.IOException
 import java.net.{ ProtocolFamily, SocketOption, DatagramSocket => JDatagramSocket, SocketAddress => JSocketAddress }
 import java.nio.channels.{ DatagramChannel => JDatagramChannel }
 
-import zio.nio.core.channels.BlockingByteChannel.Streamable
-import zio.{ IO, UIO, ZIO, blocking }
 import zio.nio.core.{ ByteBuffer, SocketAddress }
+import zio.{ IO, UIO, ZIO }
 
 /**
  * A channel for datagram-oriented sockets.
@@ -15,10 +14,9 @@ import zio.nio.core.{ ByteBuffer, SocketAddress }
  * needing to connect the channel. The channel must be connected to use `read` and `write` methods, and any methods
  * based on them such as `stream` and `sink`.
  */
-sealed abstract class DatagramChannel[R] private[channels] (override protected[channels] val channel: JDatagramChannel)
+sealed abstract class DatagramChannel private[channels] (override protected[channels] val channel: JDatagramChannel)
     extends ModalChannel
-    with ByteChannel[R]
-    with WithEnv[R] {
+    with ByteChannel {
 
   /**
    * Binds this channel's underlying socket to the given local address. Passing `None` binds to an
@@ -91,8 +89,8 @@ sealed abstract class DatagramChannel[R] private[channels] (override protected[c
 
 object DatagramChannel {
 
-  trait BlockingSendReceive[R] {
-    this: WithEnv[R] =>
+  trait BlockingSendReceive {
+    this: WithEnv =>
 
     protected[channels] val channel: JDatagramChannel
 
@@ -106,7 +104,7 @@ object DatagramChannel {
      * @param dst the destination buffer
      * @return the socket address of the datagram's source.
      */
-    def receive(dst: ByteBuffer): ZIO[R, IOException, SocketAddress] =
+    def receive(dst: ByteBuffer): ZIO[Env, IOException, SocketAddress] =
       withEnv {
         IO.effect(SocketAddress.fromJava(channel.receive(dst.byteBuffer))).refineToOrDie[IOException]
       }
@@ -116,7 +114,7 @@ object DatagramChannel {
      * Blocks until the entire buffer is sent.
      * Unlike `write*` methods, this can be used without first connecting this channel.
      */
-    def send(src: ByteBuffer, target: SocketAddress): ZIO[R, IOException, Unit] =
+    def send(src: ByteBuffer, target: SocketAddress): ZIO[Env, IOException, Unit] =
       withEnv {
         IO.effect(channel.send(src.byteBuffer, target.jSocketAddress)).refineToOrDie[IOException].unit
       }
@@ -124,11 +122,13 @@ object DatagramChannel {
   }
 
   final class Blocking private[DatagramChannel] (c: JDatagramChannel)
-      extends DatagramChannel[blocking.Blocking](c)
+      extends DatagramChannel(c)
       with BlockingByteChannel
-      with BlockingSendReceive[blocking.Blocking] {
+      with BlockingSendReceive {
 
     self =>
+
+    import Blocking.ScopedBlockingDatagram
 
     def nonBlockingMode: IO[IOException, NonBlocking] =
       IO.effect(c.configureBlocking(false))
@@ -136,13 +136,9 @@ object DatagramChannel {
         .as(new NonBlocking(c))
 
     def datagramBlocking[R, E, A](
-      f: Streamable with BlockingSendReceive[Any] => ZIO[R, E, A]
+      f: ScopedBlockingDatagram => ZIO[R, E, A]
     ): ZIO[R with zio.blocking.Blocking, E, A] = {
-      val channel = new ByteChannel[Any]
-        with GatheringByteChannel.SinkWrite[Any]
-        with ScatteringByteChannel.StreamRead[Any]
-        with BlockingSendReceive[Any]
-        with WithEnv.NonBlocking {
+      val channel = new ScopedBlockingDatagram {
         override protected[channels] val channel = self.channel
       }
       WithEnv.withBlocking(channel)(f(channel))
@@ -150,6 +146,8 @@ object DatagramChannel {
   }
 
   object Blocking {
+
+    trait ScopedBlockingDatagram extends BlockingByteChannel.ScopedBlockingReadsAndWrites with BlockingSendReceive
 
     def fromJava(javaDatagramChannel: JDatagramChannel): Blocking =
       new Blocking(javaDatagramChannel)
@@ -171,7 +169,7 @@ object DatagramChannel {
   }
 
   final class NonBlocking private[DatagramChannel] (c: JDatagramChannel)
-      extends DatagramChannel[Any](c)
+      extends DatagramChannel(c)
       with SelectableChannel {
 
     def blockingMode: IO[IOException, Blocking] =

@@ -23,7 +23,7 @@ import scala.collection.JavaConverters._
  */
 final class FileChannel private[channels] (override protected[channels] val channel: JFileChannel)
     extends BlockingByteChannel
-    with FileChannel.BlockingOps[Blocking]
+    with FileChannel.BlockingOps
     with WithEnv.Blocking {
 
   self =>
@@ -62,13 +62,13 @@ final class FileChannel private[channels] (override protected[channels] val chan
   override def transferTo(
     position: Long,
     count: Long,
-    target: GatheringByteChannel[_]
+    target: GatheringByteChannel
   ): ZIO[Blocking, IOException, Long] =
     effectBlockingCancelable(channel.transferTo(position, count, target.channel))(close.ignore)
       .refineToOrDie[IOException]
 
   override def transferFrom(
-    src: ScatteringByteChannel[_],
+    src: ScatteringByteChannel,
     position: Long,
     count: Long
   ): ZIO[Blocking, IOException, Long] =
@@ -123,7 +123,7 @@ final class FileChannel private[channels] (override protected[channels] val chan
   ): IO[IOException, Option[FileLock]] =
     ZIO.effect(Option(channel.tryLock(position, size, shared)).map(new FileLock(_))).refineToOrDie[IOException]
 
-  final private class OpsWithoutBlocking extends BlockingOps[Any] with WithEnv.NonBlocking {
+  final class ScopedBlockingOps extends BlockingOps with WithEnv.NonBlocking {
 
     override protected[channels] val channel: channels.FileChannel =
       self.channel
@@ -134,11 +134,11 @@ final class FileChannel private[channels] (override protected[channels] val chan
     override def force(metadata: Boolean): IO[IOException, Unit] =
       IO.effect(channel.force(metadata)).refineToOrDie[IOException]
 
-    override def transferTo(position: Long, count: Long, target: GatheringByteChannel[_]): IO[IOException, Long] =
+    override def transferTo(position: Long, count: Long, target: GatheringByteChannel): IO[IOException, Long] =
       IO.effect(channel.transferTo(position, count, target.channel))
         .refineToOrDie[IOException]
 
-    override def transferFrom(src: ScatteringByteChannel[_], position: Long, count: Long): IO[IOException, Long] =
+    override def transferFrom(src: ScatteringByteChannel, position: Long, count: Long): IO[IOException, Long] =
       IO.effect(channel.transferFrom(src.channel, position, count))
         .refineToOrDie[IOException]
 
@@ -174,8 +174,8 @@ final class FileChannel private[channels] (override protected[channels] val chan
    * @param f And effect that can perform file operations given a non-blocking file channel.
    *          The entire effect is run on the same thread in the blocking pool.
    */
-  def fileBlocking[R, E, A](f: BlockingOps[Any] => ZIO[R, E, A]): ZIO[R with Blocking, E, A] =
-    WithEnv.withBlocking(this)(f(new OpsWithoutBlocking))
+  def fileBlocking[R, E, A](f: ScopedBlockingOps => ZIO[R, E, A]): ZIO[R with Blocking, E, A] =
+    WithEnv.withBlocking(this)(f(new ScopedBlockingOps))
 
 }
 
@@ -215,10 +215,7 @@ object FileChannel {
     def PRIVATE: FileChannel.MapMode    = JFileChannel.MapMode.PRIVATE
   }
 
-  trait BlockingOps[R]
-      extends ByteChannel[R]
-      with GatheringByteChannel.SinkWrite[R]
-      with ScatteringByteChannel.StreamRead[R] {
+  trait BlockingOps extends ByteChannel with GatheringByteChannel.SinkWrite with ScatteringByteChannel.StreamRead {
 
     override protected[channels] val channel: channels.FileChannel
 
@@ -231,7 +228,7 @@ object FileChannel {
      *
      * @param size The new size, must be >= 0
      */
-    def truncate(size: Long): ZIO[R, IOException, Unit]
+    def truncate(size: Long): ZIO[Env, IOException, Unit]
 
     /**
      * Forces any updates to this channel's file to be written to the storage device that contains it.
@@ -239,7 +236,7 @@ object FileChannel {
      * @param metadata If true then this method is required to force changes to both the file's content and metadata to
      *                 be written to storage; otherwise, it need only force content changes to be written
      */
-    def force(metadata: Boolean): ZIO[R, IOException, Unit]
+    def force(metadata: Boolean): ZIO[Env, IOException, Unit]
 
     /**
      * Transfers bytes from this channel's file to the given writable byte channel.
@@ -248,7 +245,7 @@ object FileChannel {
      * @param count The maximum number of bytes to be transferred, must be >= 0
      * @param target The target channel
      */
-    def transferTo(position: Long, count: Long, target: GatheringByteChannel[_]): ZIO[R, IOException, Long]
+    def transferTo(position: Long, count: Long, target: GatheringByteChannel): ZIO[Env, IOException, Long]
 
     /**
      * Transfers bytes into this channel's file from the given readable byte channel.
@@ -257,7 +254,7 @@ object FileChannel {
      * @param position The position within the file at which the transfer is to begin, must be >= 0
      * @param count The maximum number of bytes to be transferred, must be >= 0
      */
-    def transferFrom(src: ScatteringByteChannel[_], position: Long, count: Long): ZIO[R, IOException, Long]
+    def transferFrom(src: ScatteringByteChannel, position: Long, count: Long): ZIO[Env, IOException, Long]
 
     /**
      * Reads a sequence of bytes from this channel into the given buffer, starting at the given file position.
@@ -269,7 +266,7 @@ object FileChannel {
      * @param dst The buffer to put the read bytes into
      * @param position The file position at which the transfer is to begin, must be >= 0
      */
-    def read(dst: ByteBuffer, position: Long): ZIO[R, IOException, Int]
+    def read(dst: ByteBuffer, position: Long): ZIO[Env, IOException, Int]
 
     /**
      * Writes a sequence of bytes to this channel from the given buffer, starting at the given file position.
@@ -283,7 +280,7 @@ object FileChannel {
      * @param position The file position at which the transfer is to begin, must be >= 0
      * @return
      */
-    def write(src: ByteBuffer, position: Long): ZIO[R, IOException, Int]
+    def write(src: ByteBuffer, position: Long): ZIO[Env, IOException, Int]
 
     /**
      * Maps a region of this channel's file directly into memory.
@@ -300,7 +297,7 @@ object FileChannel {
      * @param position The position within the file at which the mapped region is to start, must be >= 0
      * @param size The size of the region to be mapped, must be >= 0 and <= `Int.MaxValue`
      */
-    def map(mode: JFileChannel.MapMode, position: Long, size: Long): ZIO[R, IOException, MappedByteBuffer]
+    def map(mode: JFileChannel.MapMode, position: Long, size: Long): ZIO[Env, IOException, MappedByteBuffer]
 
     /**
      * Acquires a lock on the given region of this channel's file.
@@ -317,7 +314,7 @@ object FileChannel {
       position: Long = 0L,
       size: Long = Long.MaxValue,
       shared: Boolean = false
-    ): ZIO[R, IOException, FileLock]
+    ): ZIO[Env, IOException, FileLock]
 
   }
 
